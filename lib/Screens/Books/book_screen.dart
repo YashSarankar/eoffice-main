@@ -754,6 +754,7 @@ class _BookScreenState extends State<BookScreen>
             //TODO: Fix This searchResult
             searchResults: [],
             callBack: setFilePath,
+            tabController: _tabController,
           ),
           _isUserIdLoading
               ? Center(
@@ -776,6 +777,7 @@ class _BookScreenState extends State<BookScreen>
                       //TODO: Fix this searchResult
                       searchResults: [],
                       callBack: setFilePath,
+                      tabController: _tabController,
                     ),
         ],
       ),
@@ -851,6 +853,7 @@ class CustomContainer extends StatefulWidget {
   final ValueChanged<String> goToPage;
   final VoidCallback nextPage;
   final Function callBack;
+  final TabController tabController;
 
   CustomContainer({
     super.key,
@@ -863,6 +866,7 @@ class CustomContainer extends StatefulWidget {
     required this.goToPage,
     required this.nextPage,
     required this.callBack,
+    required this.tabController,
   });
 
   @override
@@ -878,21 +882,24 @@ class _CustomContainerState extends State<CustomContainer>
   late String filePath;
   late CancelToken cancelToken;
   var getPathFile = DirectoryPath();
+  String? lastDownloadedOldBookUrl;
+  String? lastDownloadedEBookUrl;
+  double latestDownloadProgress = 0;
+
+  TabController get _tabController => widget.tabController;
 
   @override
   bool get wantKeepAlive => true; // This keeps the widget's state alive
 
-  // Add method to get downloads directory
-  Future<String> getDownloadPath() async {
+  // Modify to use a single method for getting storage path
+  Future<String> getStoragePath() async {
     if (Platform.isAndroid) {
-      // For Android, save to the Downloads directory
       final directory = Directory('/storage/emulated/0/Download');
       if (!await directory.exists()) {
         await directory.create(recursive: true);
       }
       return directory.path;
     } else {
-      // For iOS and other platforms, use the documents directory
       final directory = await getApplicationDocumentsDirectory();
       return directory.path;
     }
@@ -928,10 +935,28 @@ class _CustomContainerState extends State<CustomContainer>
       return;
     }
 
+    // Check if we already have the current version
+    final isOldBook = _tabController.index == 0;
+    if (!isLatestDownload && 
+        ((isOldBook && lastDownloadedOldBookUrl == widget.fileUrl) ||
+         (!isOldBook && lastDownloadedEBookUrl == widget.fileUrl)) && 
+        fileExists && 
+        await File(filePath).exists()) {
+      openfile();
+      return;
+    }
+
     cancelToken = CancelToken();
-    var downloadPath = await getDownloadPath();
-    fileName = 'eoffice book.pdf';
-    filePath = '$downloadPath/$fileName';
+    var storagePath = await getStoragePath();
+    
+    // Use different filenames for different books and versions
+    if (isLatestDownload) {
+      fileName = isOldBook ? 'oldbook_latest.pdf' : 'ebook_latest.pdf';
+    } else {
+      fileName = isOldBook ? 'oldbook_preview.pdf' : 'ebook_preview.pdf';
+    }
+    
+    filePath = '$storagePath/$fileName';
 
     final file = File(filePath);
     if (await file.exists()) {
@@ -949,7 +974,11 @@ class _CustomContainerState extends State<CustomContainer>
         filePath,
         onReceiveProgress: (count, total) {
           setState(() {
-            progress = (count / total);
+            if (isLatestDownload) {
+              latestDownloadProgress = count / total;
+            } else {
+              progress = count / total;
+            }
           });
         },
         cancelToken: cancelToken
@@ -958,22 +987,28 @@ class _CustomContainerState extends State<CustomContainer>
       setState(() {
         dowloading = false;
         fileExists = true;
+        if (!isLatestDownload) {
+          if (isOldBook) {
+            lastDownloadedOldBookUrl = widget.fileUrl;
+          } else {
+            lastDownloadedEBookUrl = widget.fileUrl;
+          }
+        } else {
+          // Automatically open PDF for latest download
+          OpenFile.open(filePath);
+        }
       });
 
-      widget.callBack(filePath);
+      if (!isLatestDownload) {
+        widget.callBack(filePath);
+      }
 
+      String bookType = isOldBook ? 'Old Book' : 'eBook';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('eoffice book downloaded to Downloads folder'),
-          action: SnackBarAction(
-            label: 'OPEN',
-            onPressed: () async {
-              final file = File(filePath);
-              if (await file.exists()) {
-                OpenFile.open(filePath);
-              }
-            },
-          ),
+          content: Text(isLatestDownload 
+            ? 'Latest $bookType downloaded and opened'
+            : '$bookType downloaded for preview'),
           duration: Duration(seconds: 3),
         ),
       );
@@ -981,6 +1016,9 @@ class _CustomContainerState extends State<CustomContainer>
       print('Download error: $e');
       setState(() {
         dowloading = false;
+        if (isLatestDownload) {
+          latestDownloadProgress = 0;
+        }
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -999,16 +1037,44 @@ class _CustomContainerState extends State<CustomContainer>
     });
   }
 
+  // Modify checkFileExit to check for preview file
   checkFileExit() async {
-    var storePath = await getPathFile.getPath();
-    filePath = '$storePath/$fileName';
-    bool fileExistCheck = await File(filePath).exists();
-    setState(() {
-      fileExists = fileExistCheck;
-    });
-
-    if (fileExists) {
-      widget.callBack(filePath); // Ensure this line is present
+    try {
+      var storagePath = await getStoragePath();
+      bool isOldBook = _tabController.index == 0;
+      
+      filePath = '$storagePath/${isOldBook ? 'oldbook_preview.pdf' : 'ebook_preview.pdf'}';
+      bool fileExistCheck = await File(filePath).exists();
+      
+      if (fileExistCheck) {
+        final prefs = await SharedPreferences.getInstance();
+        if (isOldBook) {
+          await prefs.setString('oldbook_preview_path', filePath);
+          await prefs.setString('last_oldbook_url', widget.fileUrl);
+        } else {
+          await prefs.setString('ebook_preview_path', filePath);
+          await prefs.setString('last_ebook_url', widget.fileUrl);
+        }
+        
+        setState(() {
+          fileExists = true;
+          if (isOldBook) {
+            lastDownloadedOldBookUrl = widget.fileUrl;
+          } else {
+            lastDownloadedEBookUrl = widget.fileUrl;
+          }
+        });
+        widget.callBack(filePath);
+      } else {
+        setState(() {
+          fileExists = false;
+        });
+      }
+    } catch (e) {
+      print('Error checking file existence: $e');
+      setState(() {
+        fileExists = false;
+      });
     }
   }
 
@@ -1029,14 +1095,58 @@ class _CustomContainerState extends State<CustomContainer>
     }
   }
 
+  Future<void> restoreLastSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      bool isOldBook = _tabController.index == 0;
+      
+      final savedPath = isOldBook 
+          ? prefs.getString('oldbook_preview_path')
+          : prefs.getString('ebook_preview_path');
+      final savedUrl = isOldBook
+          ? prefs.getString('last_oldbook_url')
+          : prefs.getString('last_ebook_url');
+      
+      if (savedPath != null && savedUrl != null) {
+        final file = File(savedPath);
+        if (await file.exists()) {
+          setState(() {
+            filePath = savedPath;
+            if (isOldBook) {
+              lastDownloadedOldBookUrl = savedUrl;
+            } else {
+              lastDownloadedEBookUrl = savedUrl;
+            }
+            fileExists = true;
+          });
+          widget.callBack(filePath);
+        } else {
+          // Clear preferences if file doesn't exist
+          if (isOldBook) {
+            await prefs.remove('oldbook_preview_path');
+            await prefs.remove('last_oldbook_url');
+          } else {
+            await prefs.remove('ebook_preview_path');
+            await prefs.remove('last_ebook_url');
+          }
+        }
+      }
+    } catch (e) {
+      print('Error restoring last session: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     setState(() {
-      fileName = 'eoffice book.pdf';
+      fileName = _tabController.index == 0 ? 'oldbook_preview.pdf' : 'ebook_preview.pdf';
     });
-    print("FILEURL: ${widget.fileUrl}");
-    checkFileExit();
+    restoreLastSession().then((_) {
+      if (!fileExists) {
+        checkFileExit();
+      }
+    });
   }
 
   @override
@@ -1201,14 +1311,27 @@ class _CustomContainerState extends State<CustomContainer>
                   ],
                 ),
                 child: dowloading
-                    ? SizedBox(
-                        width: 30,
-                        height: 30,
-                        child: CircularProgressIndicator(
-                          value: progress,
-                          strokeWidth: 3,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
+                    ? Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          SizedBox(
+                            width: 30,
+                            height: 30,
+                            child: CircularProgressIndicator(
+                              value: latestDownloadProgress,
+                              strokeWidth: 3,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          ),
+                          Text(
+                            '${(latestDownloadProgress * 100).toInt()}%',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       )
                     : Icon(
                         Icons.download,
