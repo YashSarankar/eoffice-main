@@ -56,6 +56,7 @@ dependencies:
   #  pdf_image_renderer: ^0.7.0
   path_provider: ^2.1.2
   dio: ^5.7.0
+  flutter_downloader: ^1.11.6
   syncfusion_flutter_pdfviewer: ^28.1.37
   #  pdf_render: ^1.4.12
   flutter_highlight: ^0.7.0

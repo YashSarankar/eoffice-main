@@ -880,13 +880,13 @@ class CustomContainer extends StatefulWidget {
 }
 
 class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAliveClientMixin {
-  CancelToken? cancelToken;
-  double progress = 0;
   bool dowloading = false;
+  double progress = 0;
   bool fileExists = false;
   String filePath = '';
-  var getPathFile = DirectoryPath();
   bool _isInitializing = true;
+  CancelToken? cancelToken;
+  var getPathFile = DirectoryPath();
   late BuildContext _scaffoldContext;
 
   // Separate storage keys for each book type
@@ -930,158 +930,156 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
   Widget build(BuildContext context) {
     super.build(context);
     
-    print('Building CustomContainer');
-    print('File exists: $fileExists');
-    print('File path: $filePath');
-    print('Is initializing: $_isInitializing');
-    print('Tab index: ${widget.tabController.index}');
-    
     if (_isInitializing) {
       return Center(
         child: CircularProgressIndicator(),
       );
     }
 
-    return Stack(
-      children: [
-        // Main content
-        if (fileExists && filePath.isNotEmpty)
-          Column(
-            children: [
-              Expanded(
-                child: SfPdfViewer.file(
-                  File(filePath),
-                  controller: widget.bookController,
+    return Scaffold(  // Wrap with Scaffold to ensure proper context
+      body: Stack(
+        children: [
+          // Main content
+          if (fileExists && filePath.isNotEmpty)
+            Column(
+              children: [
+                Expanded(
+                  child: SfPdfViewer.file(
+                    File(filePath),
+                    controller: widget.bookController,
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-                child: Row(
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        icon: Icon(Icons.arrow_back),
+                        onPressed: widget.previousPage,
+                      ),
+                      Container(
+                        height: 35,
+                        width: 80,
+                        child: TextField(
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 16),
+                          controller: widget.pageController,
+                          decoration: const InputDecoration(
+                            hintText: "Go to",
+                            hintStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: TextInputType.number,
+                          onSubmitted: widget.goToPage,
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.arrow_forward),
+                        onPressed: widget.nextPage,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          else
+            InkWell(
+              onTap: () => startDownload(),
+              child: Center(
+                child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    IconButton(
-                      icon: Icon(Icons.arrow_back),
-                      onPressed: widget.previousPage,
-                    ),
-                    Container(
-                      height: 35,
-                      width: 80,
-                      child: TextField(
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16),
-                        controller: widget.pageController,
-                        decoration: const InputDecoration(
-                          hintText: "Go to",
-                          hintStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                          border: OutlineInputBorder(),
+                    const Text("Download the book for preview"),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        IconButton(
+                          onPressed: () => startDownload(),
+                          icon: dowloading
+                              ? Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    CircularProgressIndicator(
+                                      value: progress,
+                                      strokeWidth: 3,
+                                      backgroundColor: Colors.grey,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                                    ),
+                                    Text(
+                                      "${(progress * 100).toInt()}%",
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                  ],
+                                )
+                              : const Icon(Icons.download, size: 30),
                         ),
-                        keyboardType: TextInputType.number,
-                        onSubmitted: widget.goToPage,
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.arrow_forward),
-                      onPressed: widget.nextPage,
+                        if (dowloading)
+                          IconButton(
+                            onPressed: () => cancelDownload(),
+                            icon: const Icon(Icons.close),
+                          ),
+                      ],
                     ),
                   ],
                 ),
               ),
-            ],
-          )
-        else
-          // Show download button if file doesn't exist or path is empty
-          InkWell(
-            onTap: () => startDownload(),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text("Download the book for preview"),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        onPressed: () => startDownload(),
-                        icon: dowloading
-                            ? Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  CircularProgressIndicator(
-                                    value: progress,
-                                    strokeWidth: 3,
-                                    backgroundColor: Colors.grey,
-                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                                  ),
-                                  Text(
-                                    "${(progress * 100).toInt()}%",
-                                    style: TextStyle(fontSize: 12),
-                                  ),
-                                ],
-                              )
-                            : const Icon(Icons.download, size: 30),
-                      ),
-                      if (dowloading)
-                        IconButton(
-                          onPressed: () => cancelDownload(),
-                          icon: const Icon(Icons.close),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
             ),
-          ),
 
-        // Download button for latest version (when file exists)
-        if (fileExists && filePath.isNotEmpty)
-          Positioned(
-            bottom: 80,
-            right: 20,
-            child: FloatingActionButton(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(50),
+          // Download button for latest version (when file exists)
+          if (fileExists && filePath.isNotEmpty)
+            Positioned(
+              bottom: 80,
+              right: 20,
+              child: Material(  // Wrap with Material widget
+                type: MaterialType.transparency,
+                child: FloatingActionButton(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(50),
+                  ),
+                  heroTag: 'download_latest',
+                  backgroundColor: Colors.blue,
+                  onPressed: () async {
+                    try {
+                      setState(() {
+                        dowloading = true;
+                        progress = 0;
+                      });
+                      await startDownload(isLatestDownload: true);
+                    } catch (e) {
+                      print('Error downloading: $e');
+                    } finally {
+                      setState(() {
+                        dowloading = false;
+                      });
+                    }
+                  },
+                  child: dowloading
+                      ? Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CircularProgressIndicator(
+                              value: progress,
+                              strokeWidth: 3,
+                              backgroundColor: Colors.grey.withOpacity(0.3),
+                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                            Text(
+                              '${(progress * 100).toInt()}%',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        )
+                      : const Icon(Icons.download, color: Colors.white),
+                ),
               ),
-              heroTag: 'download_latest',
-              backgroundColor: Colors.blue,
-              onPressed: () async {
-                try {
-                  setState(() {
-                    dowloading = true;
-                    progress = 0;
-                  });
-                  await startDownload(isLatestDownload: true);
-                } catch (e) {
-                  print('Error downloading: $e');
-                } finally {
-                  setState(() {
-                    dowloading = false;
-                  });
-                }
-              },
-              child: dowloading
-                  ? Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        CircularProgressIndicator(
-                          value: progress,
-                          strokeWidth: 3,
-                          backgroundColor: Colors.grey.withOpacity(0.3),
-                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                        Text(
-                          '${(progress * 100).toInt()}%',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    )
-                  : const Icon(Icons.download, color: Colors.white),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1141,7 +1139,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
 
   Future<void> startDownload({bool isLatestDownload = false}) async {
     if (!mounted) return;
-    if (dowloading && !isLatestDownload) return;  // Allow new downloads when isLatestDownload is true
+    if (dowloading && !isLatestDownload) return;
 
     try {
       if (!isLatestDownload) {
@@ -1153,13 +1151,6 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
 
       cancelToken = CancelToken();
 
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      if (token == null) {
-        throw Exception('Authentication token not found');
-      }
-
       var storagePath = await getStoragePath();
       String fileName = _fileName;
       
@@ -1169,6 +1160,13 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
       }
 
       String downloadPath = '$storagePath/$fileName';
+
+      // Create Dio instance without auth headers
+      final dio = Dio(BaseOptions(
+        validateStatus: (status) {
+          return status! < 500; // Accept all status codes less than 500
+        },
+      ));
 
       // Delete existing file if it exists
       final existingFile = File(downloadPath);
@@ -1182,16 +1180,9 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
         await dir.create(recursive: true);
       }
 
-      await Dio().download(
+      final response = await dio.download(
         widget.fileUrl,
         downloadPath,
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $token',
-            'Accept': 'application/pdf',
-          },
-          responseType: ResponseType.bytes,
-        ),
         onReceiveProgress: (count, total) {
           if (mounted && total != -1) {
             setState(() {
@@ -1199,7 +1190,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
             });
           }
         },
-        cancelToken: cancelToken
+        cancelToken: cancelToken,
       );
 
       // Verify and handle the downloaded file
@@ -1216,10 +1207,9 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
           if (!mounted) return;
 
           if (isLatestDownload) {
-            // For latest download, just open the file
             await OpenFile.open(downloadPath);
           } else {
-            // For initial download, set up the viewer
+            final prefs = await SharedPreferences.getInstance();
             await prefs.setString(_storageKey, downloadPath);
             await prefs.setString(_urlKey, widget.fileUrl);
 

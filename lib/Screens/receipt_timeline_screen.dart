@@ -37,12 +37,15 @@ class _ReceiptTimeLineScreenState extends State<ReceiptTimeLineScreen> {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     final userId = prefs.getString('id') ?? '0'; // Default to 0 if not found
     print('User ID: $userId');
-    final data = await _apiService.fetchReceiptsByStatus(context, int.parse(userId));
-    setState(
-      () {
-        _receiptData = data;
-      },
-    );
+    final data =
+        await _apiService.fetchReceiptsByStatus(context, int.parse(userId));
+    if (mounted) {
+      setState(
+        () {
+          _receiptData = data;
+        },
+      );
+    }
   }
 
   void _navigateToDetailScreen(String status, List<ReceiptTable> receipts) {
@@ -62,7 +65,7 @@ class _ReceiptTimeLineScreenState extends State<ReceiptTimeLineScreen> {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? userId = prefs.getString('id');
       ApiService apiServices = ApiService();
-      getReceiptResponse = await apiServices.getReceipt(userId!,context);
+      getReceiptResponse = await apiServices.getReceipt(userId!, context);
     } catch (e) {
       error = e.toString();
     }
@@ -327,7 +330,8 @@ class _MonthlyBreakdownWidgetState extends State<MonthlyBreakdownWidget> {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? userId = prefs.getString('id');
-      final response = await ApiService().getReceiptMonthlyCount(context,userId!);
+      final response =
+          await ApiService().getReceiptMonthlyCount(context, userId!);
 
       if (response['success']) {
         final monthlySummary = response['Monthly_summary'];
@@ -1093,8 +1097,8 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
 
                   return Card(
                     color: Colors.white,
-                    margin: const EdgeInsets.symmetric(
-                        vertical: 8, horizontal: 16),
+                    margin:
+                        const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                     child: ExpansionTile(
                       clipBehavior: Clip.antiAlias,
                       collapsedShape: RoundedRectangleBorder(
@@ -1139,8 +1143,7 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
                                 child: Text(
                                   receipt.receiptChecklistId!,
                                   style: const TextStyle(
-                                      fontSize: 6,
-                                      fontWeight: FontWeight.bold),
+                                      fontSize: 6, fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ),
@@ -1161,8 +1164,7 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
                                   color: Colors.grey,
                                 ),
                                 endChild: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
                                       date,
