@@ -43,7 +43,7 @@ dependencies:
   intl_phone_number_input: ^0.7.4
   flutter_signature_pad: ^3.0.1
   image_picker: ^1.1.2
-  shared_preferences: ^2.3.2
+  shared_preferences: ^2.2.2
   carousel_slider: ^5.0.0
   flutter_bloc: ^9.0.0
   flutter_screenutil: ^5.9.3
@@ -54,7 +54,7 @@ dependencies:
   #  google_ml_kit: ^0.18.0
   percent_indicator: ^4.2.3
   #  pdf_image_renderer: ^0.7.0
-  path_provider: ^2.1.4
+  path_provider: ^2.1.2
   dio: ^5.7.0
   syncfusion_flutter_pdfviewer: ^28.1.37
   #  pdf_render: ^1.4.12

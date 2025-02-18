@@ -6,7 +6,6 @@ import 'package:eoffice/Auth/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:open_file/open_file.dart';
-import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,6 +33,9 @@ class BookScreen extends StatefulWidget {
 
 class _BookScreenState extends State<BookScreen>
     with SingleTickerProviderStateMixin {
+  final GlobalKey<_CustomContainerState> oldBookKey = GlobalKey();
+  final GlobalKey<_CustomContainerState> eBookKey = GlobalKey();
+
   late TabController _tabController;
   late PdfViewerController _pgController;
   late PdfViewerController _oldBookController;
@@ -585,6 +587,7 @@ class _BookScreenState extends State<BookScreen>
 
   @override
   void dispose() {
+    // Dispose other controllers
     _tabController.dispose();
     _oldBookController.dispose();
     _eBookController.dispose();
@@ -744,6 +747,7 @@ class _BookScreenState extends State<BookScreen>
         controller: _tabController,
         children: [
           CustomContainer(
+            key: oldBookKey,
             fileUrl: 'https://eofficess.com/images/$oldBookUrl',
             bookController: _oldBookController,
             goToPage: _goToPage,
@@ -751,37 +755,38 @@ class _BookScreenState extends State<BookScreen>
             pageController: _pageController,
             previousPage: _previousPage,
             searchResultIndex: _searchResult?.currentInstanceIndex ?? 0,
-            //TODO: Fix This searchResult
             searchResults: [],
             callBack: setFilePath,
             tabController: _tabController,
+            isEbook: false,
           ),
           _isUserIdLoading
-              ? Center(
-                  child:
-                      CircularProgressIndicator()) // Show loader while fetching user ID
+              ? Center(child: CircularProgressIndicator())
               : _userId == null || _userId!.isEmpty
-                  ? Center(
-                      child:
-                          Text('User ID not found')) // Handle missing user ID
+                  ? Center(child: Text('User ID not found'))
                   : CustomContainer(
-                      fileUrl:
-                          'https://eofficess.com/api/generate-merge-pdf/$_userId',
+                      key: eBookKey,
+                      fileUrl: 'https://eofficess.com/api/generate-merge-pdf/$_userId',
                       bookController: _eBookController,
                       goToPage: _goToPage,
                       nextPage: _nextPage,
                       pageController: _pageController,
                       previousPage: _previousPage,
-                      searchResultIndex:
-                          _searchResult?.currentInstanceIndex ?? 0,
-                      //TODO: Fix this searchResult
+                      searchResultIndex: _searchResult?.currentInstanceIndex ?? 0,
                       searchResults: [],
                       callBack: setFilePath,
                       tabController: _tabController,
+                      isEbook: true,
                     ),
         ],
       ),
     );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    print('BookScreen dependencies changed');
   }
 }
 
@@ -854,9 +859,10 @@ class CustomContainer extends StatefulWidget {
   final VoidCallback nextPage;
   final Function callBack;
   final TabController tabController;
+  final bool isEbook;
 
   CustomContainer({
-    super.key,
+    Key? key,
     required this.fileUrl,
     required this.searchResults,
     required this.searchResultIndex,
@@ -867,482 +873,429 @@ class CustomContainer extends StatefulWidget {
     required this.nextPage,
     required this.callBack,
     required this.tabController,
-  });
+    required this.isEbook,
+  }) : super(key: key);
 
   @override
   State<CustomContainer> createState() => _CustomContainerState();
 }
 
-class _CustomContainerState extends State<CustomContainer>
-    with AutomaticKeepAliveClientMixin {
+class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAliveClientMixin {
+  CancelToken? cancelToken;
+  double progress = 0;
   bool dowloading = false;
   bool fileExists = false;
-  double progress = 0;
-  String fileName = "";
-  late String filePath;
-  late CancelToken cancelToken;
+  String filePath = '';
   var getPathFile = DirectoryPath();
-  String? lastDownloadedOldBookUrl;
-  String? lastDownloadedEBookUrl;
-  double latestDownloadProgress = 0;
+  bool _isInitializing = true;
 
-  TabController get _tabController => widget.tabController;
+  // Separate storage keys for each book type
+  static const String OLD_BOOK_PATH_KEY = 'oldbook_preview_path';
+  static const String EBOOK_PATH_KEY = 'ebook_preview_path';
+  static const String OLD_BOOK_URL_KEY = 'last_oldbook_url';
+  static const String EBOOK_URL_KEY = 'last_ebook_url';
+
+  String get _storageKey => widget.isEbook ? EBOOK_PATH_KEY : OLD_BOOK_PATH_KEY;
+  String get _urlKey => widget.isEbook ? EBOOK_URL_KEY : OLD_BOOK_URL_KEY;
+  String get _fileName => widget.isEbook ? 'ebook_preview.pdf' : 'oldbook_preview.pdf';
 
   @override
   bool get wantKeepAlive => true; // This keeps the widget's state alive
 
-  // Modify to use a single method for getting storage path
+  @override
+  void initState() {
+    super.initState();
+    print('Initializing ${widget.isEbook ? "eBook" : "Old Book"} container');
+    _initializeFilePath();
+  }
+
   Future<String> getStoragePath() async {
     if (Platform.isAndroid) {
-      final directory = Directory('/storage/emulated/0/Download');
+      if (await Permission.storage.isGranted) {
+        final directory = await getExternalStorageDirectory();
+        if (directory != null) {
+          // Create separate directories for each book type
+          final path = '${directory.path}/PDFs/${widget.isEbook ? "ebook" : "oldbook"}';
+          final dir = Directory(path);
+          if (!await dir.exists()) {
+            await dir.create(recursive: true);
+          }
+          return path;
+        }
+      }
+      // Fallback to downloads directory with separate folders
+      final directory = Directory('/storage/emulated/0/Download/${widget.isEbook ? "ebook" : "oldbook"}');
       if (!await directory.exists()) {
         await directory.create(recursive: true);
       }
       return directory.path;
     } else {
       final directory = await getApplicationDocumentsDirectory();
-      return directory.path;
+      final path = '${directory.path}/${widget.isEbook ? "ebook" : "oldbook"}';
+      final dir = Directory(path);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      return path;
     }
   }
 
-  // Add method to request storage permission
   Future<bool> _requestStoragePermission() async {
     if (Platform.isAndroid) {
-      // Request notification permission for Android 13+
-      if (await Permission.notification.isDenied) {
-        await Permission.notification.request();
-      }
-      
+      // Request basic storage permission
       final status = await Permission.storage.request();
       if (!status.isGranted) {
-        final result = await Permission.manageExternalStorage.request();
-        return result.isGranted;
+        // For Android 11 and above
+        final externalStatus = await Permission.manageExternalStorage.request();
+        return externalStatus.isGranted;
       }
       return status.isGranted;
     }
     return true;
   }
 
-  // Modify startDownload method
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    
+    print('Building CustomContainer');
+    print('File exists: $fileExists');
+    print('File path: $filePath');
+    print('Is initializing: $_isInitializing');
+    print('Tab index: ${widget.tabController.index}');
+    
+    if (_isInitializing) {
+      return Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    return Stack(
+      children: [
+        // Main content
+        if (fileExists && filePath.isNotEmpty)
+          Column(
+            children: [
+              Expanded(
+                child: SfPdfViewer.file(
+                  File(filePath),
+                  controller: widget.bookController,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.arrow_back),
+                      onPressed: widget.previousPage,
+                    ),
+                    Container(
+                      height: 35,
+                      width: 80,
+                      child: TextField(
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 16),
+                        controller: widget.pageController,
+                        decoration: const InputDecoration(
+                          hintText: "Go to",
+                          hintStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: TextInputType.number,
+                        onSubmitted: widget.goToPage,
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.arrow_forward),
+                      onPressed: widget.nextPage,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          )
+        else
+          // Show download button if file doesn't exist or path is empty
+          InkWell(
+            onTap: () => startDownload(),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("Download the book for preview"),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        onPressed: () => startDownload(),
+                        icon: dowloading
+                            ? Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  CircularProgressIndicator(
+                                    value: progress,
+                                    strokeWidth: 3,
+                                    backgroundColor: Colors.grey,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                                  ),
+                                  Text(
+                                    "${(progress * 100).toInt()}%",
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                ],
+                              )
+                            : const Icon(Icons.download, size: 30),
+                      ),
+                      if (dowloading)
+                        IconButton(
+                          onPressed: () => cancelDownload(),
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // Download button for latest version (when file exists)
+        if (fileExists && filePath.isNotEmpty)
+          Positioned(
+            bottom: 80,
+            right: 20,
+            child: FloatingActionButton(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(50),
+              ),
+              heroTag: 'download_latest',
+              backgroundColor: Colors.blue,
+              onPressed: () => startDownload(isLatestDownload: true),
+              child: dowloading
+                  ? Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        CircularProgressIndicator(
+                          value: progress,
+                          strokeWidth: 3,
+                          backgroundColor: Colors.grey.withOpacity(0.3),
+                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                        Text(
+                          '${(progress * 100).toInt()}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    )
+                  : const Icon(Icons.download, color: Colors.white),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _initializeFilePath() async {
+    if (!mounted) return;
+    
+    print('Initializing file path for ${widget.isEbook ? "eBook" : "Old Book"}');
+    
+    setState(() {
+      _isInitializing = true;
+      fileExists = false;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      String? savedPath = prefs.getString(_storageKey);
+      String? savedUrl = prefs.getString(_urlKey);
+      
+      // Clear saved paths if URL has changed or file doesn't exist
+      if (savedPath != null) {
+        final file = File(savedPath);
+        if (!await file.exists() || savedUrl != widget.fileUrl) {
+          // Clear the stored path and URL
+          await prefs.remove(_storageKey);
+          await prefs.remove(_urlKey);
+          savedPath = null;
+          
+          // Delete the file if it exists but URL has changed
+          if (await file.exists()) {
+            try {
+              await file.delete();
+            } catch (e) {
+              print('Error deleting old file: $e');
+            }
+          }
+        }
+      }
+
+      if (savedPath != null && await File(savedPath).exists()) {
+        setState(() {
+          filePath = savedPath!;
+          fileExists = true;
+          _isInitializing = false;
+        });
+        widget.callBack(filePath);
+        return;
+      }
+
+      // Check in default location
+      var storagePath = await getStoragePath();
+      String defaultPath = '$storagePath/$_fileName';
+      
+      final defaultFile = File(defaultPath);
+      if (await defaultFile.exists()) {
+        // Delete the file if it exists but no URL is stored
+        // This ensures fresh download after reinstall
+        if (savedUrl == null) {
+          try {
+            await defaultFile.delete();
+            await prefs.remove(_storageKey);
+            await prefs.remove(_urlKey);
+          } catch (e) {
+            print('Error deleting default file: $e');
+          }
+        } else {
+          setState(() {
+            filePath = defaultPath;
+            fileExists = true;
+            _isInitializing = false;
+          });
+          widget.callBack(filePath);
+          await prefs.setString(_storageKey, defaultPath);
+        }
+      }
+    } catch (e) {
+      print('Error in _initializeFilePath: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
+    }
+  }
+
   Future<void> startDownload({bool isLatestDownload = false}) async {
+    if (!mounted) return;
     if (dowloading) return;
 
     final hasPermission = await _requestStoragePermission();
     if (!hasPermission) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Storage permission is required to download files')),
+        const SnackBar(
+          content: Text('Storage permission is required to download and view files'),
+          action: SnackBarAction(
+            label: 'Settings',
+            onPressed: openAppSettings,
+          ),
+        ),
       );
       return;
     }
 
-    // Check if we already have the current version
-    final isOldBook = _tabController.index == 0;
-    if (!isLatestDownload && 
-        ((isOldBook && lastDownloadedOldBookUrl == widget.fileUrl) ||
-         (!isOldBook && lastDownloadedEBookUrl == widget.fileUrl)) && 
-        fileExists && 
-        await File(filePath).exists()) {
-      openfile();
-      return;
-    }
-
-    cancelToken = CancelToken();
-    var storagePath = await getStoragePath();
-    
-    // Use different filenames for different books and versions
-    if (isLatestDownload) {
-      fileName = isOldBook ? 'oldbook_latest.pdf' : 'ebook_latest.pdf';
-    } else {
-      fileName = isOldBook ? 'oldbook_preview.pdf' : 'ebook_preview.pdf';
-    }
-    
-    filePath = '$storagePath/$fileName';
-
-    final file = File(filePath);
-    if (await file.exists()) {
-      await file.delete();
-    }
-
-    setState(() {
-      dowloading = true;
-      progress = 0;
-    });
-
     try {
+      setState(() {
+        dowloading = true;
+        progress = 0;
+      });
+
+      // Initialize cancelToken here
+      cancelToken = CancelToken();
+
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+      
+      var storagePath = await getStoragePath();
+      String fileName = _fileName;
+      
+      if (isLatestDownload) {
+        String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+        fileName = widget.isEbook ? 'ebook_$timestamp.pdf' : 'oldbook_$timestamp.pdf';
+      }
+
+      filePath = '$storagePath/$fileName';
+
       await Dio().download(
-        widget.fileUrl, 
+        widget.fileUrl,
         filePath,
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $token',
+          },
+        ),
         onReceiveProgress: (count, total) {
-          setState(() {
-            if (isLatestDownload) {
-              latestDownloadProgress = count / total;
-            } else {
+          if (mounted) {
+            setState(() {
               progress = count / total;
-            }
-          });
+            });
+          }
         },
         cancelToken: cancelToken
       );
 
-      setState(() {
-        dowloading = false;
-        fileExists = true;
-        if (!isLatestDownload) {
-          if (isOldBook) {
-            lastDownloadedOldBookUrl = widget.fileUrl;
+      // Verify the downloaded file
+      final file = File(filePath);
+      if (await file.exists()) {
+        try {
+          await file.readAsBytes();
+          if (!mounted) return;
+          
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_storageKey, filePath);
+          await prefs.setString(_urlKey, widget.fileUrl);
+
+          setState(() {
+            fileExists = true;
+            dowloading = false;
+          });
+
+          if (!isLatestDownload) {
+            widget.callBack(filePath);
           } else {
-            lastDownloadedEBookUrl = widget.fileUrl;
+            OpenFile.open(filePath);
           }
-        } else {
-          // Automatically open PDF for latest download
-          OpenFile.open(filePath);
+        } catch (e) {
+          throw Exception('Downloaded file is corrupted');
         }
-      });
-
-      if (!isLatestDownload) {
-        widget.callBack(filePath);
       }
-
-      String bookType = isOldBook ? 'Old Book' : 'eBook';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isLatestDownload 
-            ? 'Latest $bookType downloaded and opened'
-            : '$bookType downloaded for preview'),
-          duration: Duration(seconds: 3),
-        ),
-      );
     } catch (e) {
       print('Download error: $e');
+      if (!mounted) return;
+      
       setState(() {
         dowloading = false;
-        if (isLatestDownload) {
-          latestDownloadProgress = 0;
-        }
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Download failed: ${e.toString()}'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-    }
-  }
-
-  cancelDownload() {
-    cancelToken.cancel();
-    setState(() {
-      dowloading = false;
-    });
-  }
-
-  // Modify checkFileExit to check for preview file
-  checkFileExit() async {
-    try {
-      var storagePath = await getStoragePath();
-      bool isOldBook = _tabController.index == 0;
-      
-      filePath = '$storagePath/${isOldBook ? 'oldbook_preview.pdf' : 'ebook_preview.pdf'}';
-      bool fileExistCheck = await File(filePath).exists();
-      
-      if (fileExistCheck) {
-        final prefs = await SharedPreferences.getInstance();
-        if (isOldBook) {
-          await prefs.setString('oldbook_preview_path', filePath);
-          await prefs.setString('last_oldbook_url', widget.fileUrl);
-        } else {
-          await prefs.setString('ebook_preview_path', filePath);
-          await prefs.setString('last_ebook_url', widget.fileUrl);
-        }
-        
-        setState(() {
-          fileExists = true;
-          if (isOldBook) {
-            lastDownloadedOldBookUrl = widget.fileUrl;
-          } else {
-            lastDownloadedEBookUrl = widget.fileUrl;
-          }
-        });
-        widget.callBack(filePath);
-      } else {
-        setState(() {
-          fileExists = false;
-        });
-      }
-    } catch (e) {
-      print('Error checking file existence: $e');
-      setState(() {
         fileExists = false;
       });
-    }
-  }
 
-  // Modify openfile method
-  Future<void> openfile() async {
-    final file = File(filePath);
-    if (await file.exists()) {
-      final result = await OpenFile.open(filePath);
-      if (result.type != ResultType.done) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open file: ${result.message}')),
+      // Store scaffold messenger before async gap
+      final messenger = ScaffoldMessenger.of(context);
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Download failed: ${e.toString()}')),
         );
       }
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('File not found')),
-      );
     }
   }
 
-  Future<void> restoreLastSession() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      bool isOldBook = _tabController.index == 0;
-      
-      final savedPath = isOldBook 
-          ? prefs.getString('oldbook_preview_path')
-          : prefs.getString('ebook_preview_path');
-      final savedUrl = isOldBook
-          ? prefs.getString('last_oldbook_url')
-          : prefs.getString('last_ebook_url');
-      
-      if (savedPath != null && savedUrl != null) {
-        final file = File(savedPath);
-        if (await file.exists()) {
-          setState(() {
-            filePath = savedPath;
-            if (isOldBook) {
-              lastDownloadedOldBookUrl = savedUrl;
-            } else {
-              lastDownloadedEBookUrl = savedUrl;
-            }
-            fileExists = true;
-          });
-          widget.callBack(filePath);
-        } else {
-          // Clear preferences if file doesn't exist
-          if (isOldBook) {
-            await prefs.remove('oldbook_preview_path');
-            await prefs.remove('last_oldbook_url');
-          } else {
-            await prefs.remove('ebook_preview_path');
-            await prefs.remove('last_ebook_url');
-          }
-        }
-      }
-    } catch (e) {
-      print('Error restoring last session: $e');
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
+  void cancelDownload() {
+    cancelToken?.cancel();
     setState(() {
-      fileName = _tabController.index == 0 ? 'oldbook_preview.pdf' : 'ebook_preview.pdf';
-    });
-    restoreLastSession().then((_) {
-      if (!fileExists) {
-        checkFileExit();
-      }
+      dowloading = false;
+      progress = 0;
     });
   }
 
   @override
-  Widget build(BuildContext context) {
-    super.build(context); // Ensure keep-alive is triggered
-    return Stack(
-      children: [
-        // Main content
-        fileExists
-            ? Column(
-                children: [
-                  if (widget.searchResults.isNotEmpty)
-                    SearchResultCard(
-                        searchResults: widget.searchResults,
-                        currentIndex: widget.searchResultIndex,
-                        onNextPressed: () {
-                          setState(() {
-                            widget.searchResultIndex++;
-                            if (widget.searchResultIndex >=
-                                widget.searchResults.length) {
-                              widget.searchResultIndex = 0;
-                            }
-                          });
-                        },
-                        onPreviousPressed: () {
-                          setState(() {
-                            widget.searchResultIndex--;
-                            if (widget.searchResultIndex < 0) {
-                              widget.searchResultIndex =
-                                  widget.searchResults.length - 1;
-                            }
-                          });
-                        }),
-                  Expanded(
-                    child: Center(
-                      child: SfPdfViewer.file(
-                        File(filePath),
-                        controller: widget.bookController,
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          icon: Icon(Icons.arrow_back),
-                          // onPressed: widget.previousPage,
-                          onPressed: () {
-                            print(
-                                "pageController: ${widget.pageController.text}");
-                            widget.previousPage();
-                          },
-                        ),
-                        Container(
-                          height: 35,
-                          width: 80,
-                          child: TextField(
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 16),
-                            controller: widget.pageController,
-                            decoration: const InputDecoration(
-                              hintText: "Go to",
-                              hintStyle: TextStyle(
-                                  fontSize: 12, fontWeight: FontWeight.w500),
-                              border: OutlineInputBorder(),
-                            ),
-                            keyboardType: TextInputType.number,
-                            onSubmitted: widget.goToPage,
-                          ),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.arrow_forward),
-                          onPressed: widget.nextPage,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              )
-            : InkWell(
-                onTap: () => fileExists && dowloading == false
-                    ? openfile()
-                    : startDownload(),
-                child: Center(
-                    child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text("Download the book for preview"),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (!fileExists)
-                          IconButton(
-                              onPressed: () {
-                                fileExists && dowloading == false
-                                    ? openfile()
-                                    : startDownload();
-                              },
-                              icon: dowloading
-                                  ? Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        CircularProgressIndicator(
-                                          value: progress,
-                                          strokeWidth: 5,
-                                          backgroundColor: Colors.grey,
-                                          valueColor:
-                                              const AlwaysStoppedAnimation<
-                                                  Color>(Colors.blue),
-                                        ),
-                                        Text(
-                                          "${(progress * 100).toStringAsFixed(0)}%",
-                                          style: TextStyle(fontSize: 12),
-                                        )
-                                      ],
-                                    )
-                                  : const Icon(
-                                      Icons.download,
-                                      size: 30,
-                                    )),
-                        if (dowloading)
-                          IconButton(
-                              onPressed: () {
-                                fileExists && dowloading == false
-                                    ? openfile()
-                                    : cancelDownload();
-                              },
-                              icon: fileExists && dowloading == false
-                                  ? const Icon(
-                                      Icons.window,
-                                      color: Colors.green,
-                                    )
-                                  : const Icon(Icons.close)),
-                      ],
-                    )
-                  ],
-                )),
-              ),
-
-        // Update the positioned download button
-        Positioned(
-          bottom: 80,
-          right: 20,
-          child: Visibility(
-            visible: fileExists,
-            child: GestureDetector(
-              onTap: () => startDownload(isLatestDownload: true),
-              child: Container(
-                padding: EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.blue,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 5,
-                      offset: Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: dowloading
-                    ? Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          SizedBox(
-                            width: 30,
-                            height: 30,
-                            child: CircularProgressIndicator(
-                              value: latestDownloadProgress,
-                              strokeWidth: 3,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          ),
-                          Text(
-                            '${(latestDownloadProgress * 100).toInt()}%',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      )
-                    : Icon(
-                        Icons.download,
-                        size: 30,
-                        color: Colors.white,
-                      ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
+  void dispose() {
+    // Safe to call cancel() on null
+    cancelToken?.cancel();
+    super.dispose();
   }
 }
