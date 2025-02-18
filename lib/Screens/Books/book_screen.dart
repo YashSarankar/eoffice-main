@@ -18,7 +18,6 @@ import 'package:pdfx/pdfx.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/widgets.dart' as pdfWidgets;
 import 'package:http/http.dart' as http;
-import 'package:permission_handler/permission_handler.dart';
 
 import 'directory_path.dart';
 
@@ -888,6 +887,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
   String filePath = '';
   var getPathFile = DirectoryPath();
   bool _isInitializing = true;
+  late BuildContext _scaffoldContext;
 
   // Separate storage keys for each book type
   static const String OLD_BOOK_PATH_KEY = 'oldbook_preview_path';
@@ -909,49 +909,21 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
     _initializeFilePath();
   }
 
-  Future<String> getStoragePath() async {
-    if (Platform.isAndroid) {
-      if (await Permission.storage.isGranted) {
-        final directory = await getExternalStorageDirectory();
-        if (directory != null) {
-          // Create separate directories for each book type
-          final path = '${directory.path}/PDFs/${widget.isEbook ? "ebook" : "oldbook"}';
-          final dir = Directory(path);
-          if (!await dir.exists()) {
-            await dir.create(recursive: true);
-          }
-          return path;
-        }
-      }
-      // Fallback to downloads directory with separate folders
-      final directory = Directory('/storage/emulated/0/Download/${widget.isEbook ? "ebook" : "oldbook"}');
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-      }
-      return directory.path;
-    } else {
-      final directory = await getApplicationDocumentsDirectory();
-      final path = '${directory.path}/${widget.isEbook ? "ebook" : "oldbook"}';
-      final dir = Directory(path);
-      if (!await dir.exists()) {
-        await dir.create(recursive: true);
-      }
-      return path;
-    }
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scaffoldContext = context;
   }
 
-  Future<bool> _requestStoragePermission() async {
-    if (Platform.isAndroid) {
-      // Request basic storage permission
-      final status = await Permission.storage.request();
-      if (!status.isGranted) {
-        // For Android 11 and above
-        final externalStatus = await Permission.manageExternalStorage.request();
-        return externalStatus.isGranted;
-      }
-      return status.isGranted;
+  Future<String> getStoragePath() async {
+    // Always use app's internal storage
+    final appDir = await getApplicationDocumentsDirectory();
+    final path = '${appDir.path}/PDFs/${widget.isEbook ? "ebook" : "oldbook"}';
+    final dir = Directory(path);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
     }
-    return true;
+    return path;
   }
 
   @override
@@ -1071,7 +1043,21 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
               ),
               heroTag: 'download_latest',
               backgroundColor: Colors.blue,
-              onPressed: () => startDownload(isLatestDownload: true),
+              onPressed: () async {
+                try {
+                  setState(() {
+                    dowloading = true;
+                    progress = 0;
+                  });
+                  await startDownload(isLatestDownload: true);
+                } catch (e) {
+                  print('Error downloading: $e');
+                } finally {
+                  setState(() {
+                    dowloading = false;
+                  });
+                }
+              },
               child: dowloading
                   ? Stack(
                       alignment: Alignment.center,
@@ -1106,72 +1092,44 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
     
     setState(() {
       _isInitializing = true;
-      fileExists = false;
     });
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      String? savedPath = prefs.getString(_storageKey);
-      String? savedUrl = prefs.getString(_urlKey);
       
-      // Clear saved paths if URL has changed or file doesn't exist
+      // Check saved file path in SharedPreferences
+      String? savedPath = prefs.getString(_storageKey);
+      
       if (savedPath != null) {
         final file = File(savedPath);
-        if (!await file.exists() || savedUrl != widget.fileUrl) {
-          // Clear the stored path and URL
-          await prefs.remove(_storageKey);
-          await prefs.remove(_urlKey);
-          savedPath = null;
-          
-          // Delete the file if it exists but URL has changed
-          if (await file.exists()) {
-            try {
-              await file.delete();
-            } catch (e) {
-              print('Error deleting old file: $e');
-            }
-          }
-        }
-      }
-
-      if (savedPath != null && await File(savedPath).exists()) {
-        setState(() {
-          filePath = savedPath!;
-          fileExists = true;
-          _isInitializing = false;
-        });
-        widget.callBack(filePath);
-        return;
-      }
-
-      // Check in default location
-      var storagePath = await getStoragePath();
-      String defaultPath = '$storagePath/$_fileName';
-      
-      final defaultFile = File(defaultPath);
-      if (await defaultFile.exists()) {
-        // Delete the file if it exists but no URL is stored
-        // This ensures fresh download after reinstall
-        if (savedUrl == null) {
-          try {
-            await defaultFile.delete();
-            await prefs.remove(_storageKey);
-            await prefs.remove(_urlKey);
-          } catch (e) {
-            print('Error deleting default file: $e');
-          }
-        } else {
+        if (await file.exists()) {
           setState(() {
-            filePath = defaultPath;
+            filePath = savedPath;
             fileExists = true;
-            _isInitializing = false;
           });
-          widget.callBack(filePath);
-          await prefs.setString(_storageKey, defaultPath);
+          widget.callBack(filePath);  // Tell parent about the file path
+          print('Saving file at: $filePath');
+          print('Saving to SharedPreferences with key: $_storageKey');
+          return;
         }
       }
+
+      // If we reach here, either no saved path or file doesn't exist
+      setState(() {
+        fileExists = false;
+        filePath = '';
+      });
+      
+      // Clear any invalid stored paths
+      await prefs.remove(_storageKey);
+      await prefs.remove(_urlKey);
+
     } catch (e) {
       print('Error in _initializeFilePath: $e');
+      setState(() {
+        fileExists = false;
+        filePath = '';
+      });
     } finally {
       if (mounted) {
         setState(() {
@@ -1183,35 +1141,25 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
 
   Future<void> startDownload({bool isLatestDownload = false}) async {
     if (!mounted) return;
-    if (dowloading) return;
-
-    final hasPermission = await _requestStoragePermission();
-    if (!hasPermission) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Storage permission is required to download and view files'),
-          action: SnackBarAction(
-            label: 'Settings',
-            onPressed: openAppSettings,
-          ),
-        ),
-      );
-      return;
-    }
+    if (dowloading && !isLatestDownload) return;  // Allow new downloads when isLatestDownload is true
 
     try {
-      setState(() {
-        dowloading = true;
-        progress = 0;
-      });
+      if (!isLatestDownload) {
+        setState(() {
+          dowloading = true;
+          progress = 0;
+        });
+      }
 
-      // Initialize cancelToken here
       cancelToken = CancelToken();
 
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       
+      if (token == null) {
+        throw Exception('Authentication token not found');
+      }
+
       var storagePath = await getStoragePath();
       String fileName = _fileName;
       
@@ -1220,18 +1168,32 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
         fileName = widget.isEbook ? 'ebook_$timestamp.pdf' : 'oldbook_$timestamp.pdf';
       }
 
-      filePath = '$storagePath/$fileName';
+      String downloadPath = '$storagePath/$fileName';
+
+      // Delete existing file if it exists
+      final existingFile = File(downloadPath);
+      if (await existingFile.exists()) {
+        await existingFile.delete();
+      }
+
+      // Create directory if it doesn't exist
+      final dir = Directory(storagePath);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
 
       await Dio().download(
         widget.fileUrl,
-        filePath,
+        downloadPath,
         options: Options(
           headers: {
             'Authorization': 'Bearer $token',
+            'Accept': 'application/pdf',
           },
+          responseType: ResponseType.bytes,
         ),
         onReceiveProgress: (count, total) {
-          if (mounted) {
+          if (mounted && total != -1) {
             setState(() {
               progress = count / total;
             });
@@ -1240,28 +1202,35 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
         cancelToken: cancelToken
       );
 
-      // Verify the downloaded file
-      final file = File(filePath);
+      // Verify and handle the downloaded file
+      final file = File(downloadPath);
       if (await file.exists()) {
+        final fileSize = await file.length();
+        if (fileSize == 0) {
+          throw Exception('Downloaded file is empty');
+        }
+
         try {
           await file.readAsBytes();
-          if (!mounted) return;
           
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString(_storageKey, filePath);
-          await prefs.setString(_urlKey, widget.fileUrl);
+          if (!mounted) return;
 
-          setState(() {
-            fileExists = true;
-            dowloading = false;
-          });
-
-          if (!isLatestDownload) {
-            widget.callBack(filePath);
+          if (isLatestDownload) {
+            // For latest download, just open the file
+            await OpenFile.open(downloadPath);
           } else {
-            OpenFile.open(filePath);
+            // For initial download, set up the viewer
+            await prefs.setString(_storageKey, downloadPath);
+            await prefs.setString(_urlKey, widget.fileUrl);
+
+            setState(() {
+              filePath = downloadPath;
+              fileExists = true;
+            });
+            widget.callBack(filePath);
           }
         } catch (e) {
+          await file.delete();
           throw Exception('Downloaded file is corrupted');
         }
       }
@@ -1269,17 +1238,24 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
       print('Download error: $e');
       if (!mounted) return;
       
-      setState(() {
-        dowloading = false;
-        fileExists = false;
-      });
+      if (!isLatestDownload) {
+        setState(() {
+          fileExists = false;
+          filePath = '';
+        });
+      }
 
-      // Store scaffold messenger before async gap
-      final messenger = ScaffoldMessenger.of(context);
-      if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('Download failed: ${e.toString()}')),
-        );
+      ScaffoldMessenger.of(_scaffoldContext).showSnackBar(
+        SnackBar(
+          content: Text('Download failed: ${e.toString()}'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (!isLatestDownload && mounted) {
+        setState(() {
+          dowloading = false;
+        });
       }
     }
   }
@@ -1294,8 +1270,32 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
 
   @override
   void dispose() {
-    // Safe to call cancel() on null
     cancelToken?.cancel();
     super.dispose();
+  }
+
+  // Add this new method to clean up old files
+  Future<void> _cleanupOldFiles() async {
+    try {
+      // Clean up old book files
+      var storagePath = await getStoragePath();
+      final directory = Directory(storagePath);
+      
+      if (await directory.exists()) {
+        // Delete all files in the directory
+        await for (var entity in directory.list()) {
+          if (entity is File) {
+            try {
+              await entity.delete();
+              print('Deleted file: ${entity.path}');
+            } catch (e) {
+              print('Error deleting file ${entity.path}: $e');
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('Error cleaning up old files: $e');
+    }
   }
 }
