@@ -76,6 +76,8 @@ class _BookScreenState extends State<BookScreen>
     _fetchCategories();
   }
 
+
+  
   Future<void> _fetchUserId() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -555,26 +557,21 @@ class _BookScreenState extends State<BookScreen>
   Future<void> setOldBookUrl() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getString('id');
-    final url =
-        Uri.parse("https://eofficess.com/api/getOldBook?user_id=$userId");
+    final url = Uri.parse("https://eofficess.com/api/getOldBook?user_id=$userId");
 
     try {
-      String? token = await getAuthToken();
-      if (token == null) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context)=>UserAppLoginScreen()));
-        throw Exception('User is not logged in');
-      }
-      final response = await http.post(url,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $token',
-          }
-          );
+      final response = await http.post(url, headers: {
+        'Content-Type': 'application/json',
+      });
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['success']) {
           final value = OldBookModel.fromJson(data);
-          oldBookUrl = value.data!.oldBook!;
+          setState(() {
+            oldBookUrl = value.oldBook!;
+            print("Old Book URL: $oldBookUrl");
+          });
         } else {
           Fluttertoast.showToast(msg: "Error while downloading book");
         }
@@ -747,7 +744,7 @@ class _BookScreenState extends State<BookScreen>
         children: [
           CustomContainer(
             key: oldBookKey,
-            fileUrl: 'https://eofficess.com/images/$oldBookUrl',
+            fileUrl: oldBookUrl,
             bookController: _oldBookController,
             goToPage: _goToPage,
             nextPage: _nextPage,
@@ -786,6 +783,8 @@ class _BookScreenState extends State<BookScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     print('BookScreen dependencies changed');
+    print("oldBookUrl: $oldBookUrl");
+
   }
 }
 
@@ -916,7 +915,6 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
   }
 
   Future<String> getStoragePath() async {
-    // Always use app's internal storage
     final appDir = await getApplicationDocumentsDirectory();
     final path = '${appDir.path}/PDFs/${widget.isEbook ? "ebook" : "oldbook"}';
     final dir = Directory(path);
@@ -936,10 +934,9 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
       );
     }
 
-    return Scaffold(  // Wrap with Scaffold to ensure proper context
+    return Scaffold(
       body: Stack(
         children: [
-          // Main content
           if (fileExists && filePath.isNotEmpty)
             Column(
               children: [
@@ -947,6 +944,12 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
                   child: SfPdfViewer.file(
                     File(filePath),
                     controller: widget.bookController,
+                    onDocumentLoadFailed: (details) {
+                      print('Failed to load document: ${details.description}');
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to load PDF: ${details.description}')),
+                      );
+                    },
                   ),
                 ),
                 Padding(
@@ -1031,7 +1034,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
             Positioned(
               bottom: 80,
               right: 20,
-              child: Material(  // Wrap with Material widget
+              child: Material(
                 type: MaterialType.transparency,
                 child: FloatingActionButton(
                   shape: RoundedRectangleBorder(
@@ -1155,8 +1158,8 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
       String fileName = _fileName;
       
       if (isLatestDownload) {
-        String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-        fileName = widget.isEbook ? 'ebook_$timestamp.pdf' : 'oldbook_$timestamp.pdf';
+        // Use the same file name to replace the existing file
+        fileName = _fileName;
       }
 
       String downloadPath = '$storagePath/$fileName';
@@ -1206,9 +1209,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
           
           if (!mounted) return;
 
-          if (isLatestDownload) {
-            await OpenFile.open(downloadPath);
-          } else {
+          if (!isLatestDownload) {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString(_storageKey, downloadPath);
             await prefs.setString(_urlKey, widget.fileUrl);

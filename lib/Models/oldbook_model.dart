@@ -1,19 +1,21 @@
 class OldBookModel {
-  bool? success;
-  Data? data;
+  final bool success;
+  final String? oldBook;
 
-  OldBookModel({this.success, this.data});
+  OldBookModel({required this.success, this.oldBook});
 
-  OldBookModel.fromJson(Map<String, dynamic> json) {
-    success = json['success'];
-    data = json['data'] != null ? new Data.fromJson(json['data']) : null;
+  factory OldBookModel.fromJson(Map<String, dynamic> json) {
+    return OldBookModel(
+      success: json['success'],
+      oldBook: json['data']['old_book'],
+    );
   }
 
   Map<String, dynamic> toJson() {
     final Map<String, dynamic> data = new Map<String, dynamic>();
     data['success'] = this.success;
-    if (this.data != null) {
-      data['data'] = this.data!.toJson();
+    if (this.oldBook != null) {
+      data['old_book'] = this.oldBook;
     }
     return data;
   }
