@@ -915,6 +915,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
   }
 
   Future<String> getStoragePath() async {
+    // Always use app's internal storage
     final appDir = await getApplicationDocumentsDirectory();
     final path = '${appDir.path}/PDFs/${widget.isEbook ? "ebook" : "oldbook"}';
     final dir = Directory(path);
@@ -934,6 +935,16 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
       );
     }
 
+    // Debug print to check file path and existence
+    print('File path: $filePath');
+    print('File exists: $fileExists');
+
+    // Log file size
+    if (fileExists) {
+      final file = File(filePath);
+      print('File size: ${file.lengthSync()} bytes');
+    }
+
     return Scaffold(
       body: Stack(
         children: [
@@ -944,6 +955,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
                   child: SfPdfViewer.file(
                     File(filePath),
                     controller: widget.bookController,
+                    key: ValueKey(filePath), // Add key to force rebuild when file changes
                     onDocumentLoadFailed: (details) {
                       print('Failed to load document: ${details.description}');
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -1034,7 +1046,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
             Positioned(
               bottom: 80,
               right: 20,
-              child: Material(
+              child: Material(  // Wrap with Material widget
                 type: MaterialType.transparency,
                 child: FloatingActionButton(
                   shape: RoundedRectangleBorder(
@@ -1152,39 +1164,36 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
         });
       }
 
-      cancelToken = CancelToken();
-
-      var storagePath = await getStoragePath();
-      String fileName = _fileName;
-      
+      // Get the latest URL from API if this is a latest download
+      String downloadUrl = widget.fileUrl;
       if (isLatestDownload) {
-        // Use the same file name to replace the existing file
-        fileName = _fileName;
+        downloadUrl = await _getLatestPdfUrl();
+        if (downloadUrl.isEmpty) {
+          throw Exception('Failed to get latest PDF URL from API');
+        }
       }
 
+      cancelToken = CancelToken();
+      var storagePath = await getStoragePath();
+      
+      // Generate unique filename for the new download
+      String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+      String fileName = widget.isEbook ? 'ebook_$timestamp.pdf' : 'oldbook_$timestamp.pdf';
       String downloadPath = '$storagePath/$fileName';
 
-      // Create Dio instance without auth headers
+      // Create Dio instance
       final dio = Dio(BaseOptions(
-        validateStatus: (status) {
-          return status! < 500; // Accept all status codes less than 500
-        },
+        validateStatus: (status) => status! < 500,
       ));
 
-      // Delete existing file if it exists
-      final existingFile = File(downloadPath);
-      if (await existingFile.exists()) {
-        await existingFile.delete();
-      }
-
-      // Create directory if it doesn't exist
+      // Create directory if needed
       final dir = Directory(storagePath);
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
 
       final response = await dio.download(
-        widget.fileUrl,
+        downloadUrl,
         downloadPath,
         onReceiveProgress: (count, total) {
           if (mounted && total != -1) {
@@ -1196,7 +1205,7 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
         cancelToken: cancelToken,
       );
 
-      // Verify and handle the downloaded file
+      // Verify downloaded file
       final file = File(downloadPath);
       if (await file.exists()) {
         final fileSize = await file.length();
@@ -1207,19 +1216,30 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
         try {
           await file.readAsBytes();
           
-          if (!mounted) return;
+          // If successful, update the stored path and show success message
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_storageKey, downloadPath);
+          await prefs.setString(_urlKey, downloadUrl);
 
-          if (!isLatestDownload) {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setString(_storageKey, downloadPath);
-            await prefs.setString(_urlKey, widget.fileUrl);
+          // Update the UI with new file and reset the PDF viewer
+          setState(() {
+            filePath = downloadPath;
+            fileExists = true;
+          });
+          widget.callBack(filePath);
 
-            setState(() {
-              filePath = downloadPath;
-              fileExists = true;
-            });
-            widget.callBack(filePath);
-          }
+          // Reset the PDF viewer controller to load the new file
+          widget.bookController.clearSelection();
+          // Force rebuild of PDF viewer
+          setState(() {});
+
+          ScaffoldMessenger.of(_scaffoldContext).showSnackBar(
+            SnackBar(content: Text('Latest version downloaded and loaded successfully')),
+          );
+
+          // Clean up old files
+          await _cleanupOldFiles(except: downloadPath);
+          
         } catch (e) {
           await file.delete();
           throw Exception('Downloaded file is corrupted');
@@ -1229,13 +1249,6 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
       print('Download error: $e');
       if (!mounted) return;
       
-      if (!isLatestDownload) {
-        setState(() {
-          fileExists = false;
-          filePath = '';
-        });
-      }
-
       ScaffoldMessenger.of(_scaffoldContext).showSnackBar(
         SnackBar(
           content: Text('Download failed: ${e.toString()}'),
@@ -1243,11 +1256,75 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
         ),
       );
     } finally {
-      if (!isLatestDownload && mounted) {
+      if (mounted) {
         setState(() {
           dowloading = false;
         });
       }
+    }
+  }
+
+  Future<String> _getLatestPdfUrl() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('id');
+      
+      if (userId == null) {
+        throw Exception('User ID not found');
+      }
+
+      if (widget.isEbook) {
+        // For eBook
+        final eBookUrl = 'https://eofficess.com/api/generate-merge-pdf/$userId';
+        print('userId: $userId');
+        print('Latest eBook URL: $eBookUrl');
+        return eBookUrl;
+      } else {
+        // For Old Book
+        print('Fetching latest Old Book URL for user: $userId');
+        final response = await http.post(
+          Uri.parse("https://eofficess.com/api/getOldBook?user_id=$userId"),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          print('API Response for Old Book: $data');
+          
+          if (data['success']) {
+            final value = OldBookModel.fromJson(data);
+            final oldBookUrl = value.oldBook ?? '';
+            print('Latest Old Book URL: $oldBookUrl');
+            return oldBookUrl;
+          }
+        }
+        print('Failed to get Old Book URL. Status code: ${response.statusCode}');
+        throw Exception('Failed to get Old Book URL');
+      }
+    } catch (e) {
+      print('Error getting latest PDF URL: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _cleanupOldFiles({required String except}) async {
+    try {
+      var storagePath = await getStoragePath();
+      final directory = Directory(storagePath);
+      
+      if (await directory.exists()) {
+        await for (var entity in directory.list()) {
+          if (entity is File && entity.path != except) {
+            try {
+              await entity.delete();
+              print('Deleted old file: ${entity.path}');
+            } catch (e) {
+              print('Error deleting file ${entity.path}: $e');
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('Error cleaning up old files: $e');
     }
   }
 
@@ -1263,30 +1340,5 @@ class _CustomContainerState extends State<CustomContainer> with AutomaticKeepAli
   void dispose() {
     cancelToken?.cancel();
     super.dispose();
-  }
-
-  // Add this new method to clean up old files
-  Future<void> _cleanupOldFiles() async {
-    try {
-      // Clean up old book files
-      var storagePath = await getStoragePath();
-      final directory = Directory(storagePath);
-      
-      if (await directory.exists()) {
-        // Delete all files in the directory
-        await for (var entity in directory.list()) {
-          if (entity is File) {
-            try {
-              await entity.delete();
-              print('Deleted file: ${entity.path}');
-            } catch (e) {
-              print('Error deleting file ${entity.path}: $e');
-            }
-          }
-        }
-      }
-    } catch (e) {
-      print('Error cleaning up old files: $e');
-    }
   }
 }
