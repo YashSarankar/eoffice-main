@@ -12,6 +12,9 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:timeline_tile/timeline_tile.dart';
+import 'package:http/http.dart' as http;
+import 'package:open_file/open_file.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 import '../Models/receipt_by_status.dart';
 import '../api_services.dart';
@@ -35,10 +38,10 @@ class _ReceiptTimeLineScreenState extends State<ReceiptTimeLineScreen> {
 
   Future<void> _fetchData() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString('id') ?? '0'; // Default to 0 if not found
+    final userId = prefs.getString('id') ?? '0'; // Gets the ID as string
     print('User ID: $userId');
     final data =
-        await _apiService.fetchReceiptsByStatus(context, int.parse(userId));
+        await _apiService.fetchReceiptsByStatus(context, int.tryParse(userId) ?? 0);
     if (mounted) {
       setState(
         () {
@@ -121,7 +124,7 @@ class _ReceiptTimeLineScreenState extends State<ReceiptTimeLineScreen> {
                       GestureDetector(
                         onTap: () {
                           _navigateToDetailScreen(
-                              'Approved', _receiptData!.approvedReceipts);
+                              'Approved', _receiptData?.approvedReceipts ?? []);
                         },
                         child: Card(
                           color: Colors.green[50],
@@ -153,7 +156,7 @@ class _ReceiptTimeLineScreenState extends State<ReceiptTimeLineScreen> {
                       GestureDetector(
                         onTap: () {
                           _navigateToDetailScreen(
-                              'Pending', _receiptData!.pendingReceipts);
+                              'Pending', _receiptData?.pendingReceipts ?? []);
                         },
                         child: Card(
                           color: Colors.yellow[50],
@@ -187,7 +190,7 @@ class _ReceiptTimeLineScreenState extends State<ReceiptTimeLineScreen> {
                       GestureDetector(
                         onTap: () {
                           _navigateToDetailScreen(
-                              'Rejected', _receiptData!.rejectedReceipts);
+                              'Rejected', _receiptData?.rejectedReceipts ?? []);
                         },
                         child: Card(
                           color: Colors.red[50],
@@ -469,73 +472,83 @@ class _LastTenReceiptsWidgetState extends State<LastTenReceiptsWidget> {
       context: context,
       builder: (context) {
         return AlertDialog(
+          backgroundColor: Colors.white,
           content: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Name: $name',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text('Name: $name',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w600)),
+              ),
               const SizedBox(height: 8),
               // Text('Status: $status', style: const TextStyle(fontSize: 14)),
               // const SizedBox(height: 8),
-              Text('Id: $id', style: const TextStyle(fontSize: 14)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16,),
+                child: Text('Id: $id', style: const TextStyle(fontSize: 14)),
+              ),
               const SizedBox(height: 16),
-
+          
               // PDF Viewer
               SizedBox(
-                height: 300,
+                height: 280,
                 child: SfPdfViewer.network(
                   'https://eofficess.com/api/user-receipt-pdf/$id', // Dynamic URL
                 ),
               ),
-
+          
               // Action Buttons
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  ElevatedButton(
-                    style:
-                        ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                    onPressed: () async {
-                      // Request permission to write to storage
-                      var status = await Permission.storage.request();
-                      if (status.isGranted) {
-                        final downloadUrl =
-                            'https://eofficess.com/api/user-receipt-pdf/$id';
-                        await downloadFile(context, downloadUrl, id);
-                      } else {
-                        // Handle permission denied
-                        print("Permission Denied");
-                      }
-                    },
-                    child: const Text('Download',
-                        style: TextStyle(color: Colors.white)),
-                  ),
-                  ElevatedButton(
-                    style:
-                        ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-                    onPressed: () async {
-                      final filePath = await _getFilePath(id);
-                      if (filePath != null) {
-                        File file = File(filePath);
-                        if (await file.exists()) {
-                          final xFile = XFile(file.path);
-                          await Share.shareXFiles([xFile],
-                              text: 'Check out this PDF: $name');
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16,),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ElevatedButton(
+                      style:
+                          ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                      onPressed: () async {
+                        // Request permission to write to storage
+                        var status = await Permission.manageExternalStorage.request();
+                        if (status.isGranted) {
+                          final downloadUrl =
+                              'https://eofficess.com/api/user-receipt-pdf/$id';
+                          await downloadFile(context, downloadUrl, id);
                         } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'File not found. Please download it first.')),
-                          );
+                          // Handle permission denied
+                          print("Permission Denied");
                         }
-                      }
-                    },
-                    child: const Text('Share',
-                        style: TextStyle(color: Colors.white)),
-                  ),
-                ],
+                      },
+                      child: const Text('Download',
+                          style: TextStyle(color: Colors.white)),
+                    ),
+                    ElevatedButton(
+                      style:
+                          ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                      onPressed: () async {
+                        final filePath = await _getFilePath(id);
+                        if (filePath != null) {
+                          File file = File(filePath);
+                          if (await file.exists()) {
+                            final xFile = XFile(file.path);
+                            await Share.shareXFiles([xFile],
+                                text: 'Check out this PDF: $name');
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'File not found. Please download it first.')),
+                            );
+                          }
+                        }
+                      },
+                      child: const Text('Share',
+                          style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -552,53 +565,96 @@ class _LastTenReceiptsWidgetState extends State<LastTenReceiptsWidget> {
     );
   }
 
-  Future<void> downloadFile(BuildContext context, String url, String id) async {
-    try {
-      // Define the path to the Downloads directory
-      final downloadsDirectory = Directory('/storage/emulated/0/Download');
+  Future<String?> _getFilePath(String id) async {
+    // Request storage permission first
+    var status = await Permission.manageExternalStorage.status;
+    if (!status.isGranted) {
+      status = await Permission.manageExternalStorage.request();
+      if (!status.isGranted) {
+        return null;
+      }
+    }
+    
+    // Get the downloads directory path
+    final dir = await getExternalStorageDirectory();
+    if (dir == null) return null;
+    
+    // Create the directory if it doesn't exist
+    final downloadsDir = Directory('${dir.path}/Downloads');
+    if (!await downloadsDir.exists()) {
+      await downloadsDir.create(recursive: true);
+    }
+    
+    return '${downloadsDir.path}/Receipt_$id.pdf';
+  }
 
-      // Ensure the directory exists
-      if (!downloadsDirectory.existsSync()) {
-        downloadsDirectory.createSync(recursive: true);
+  Future<void> downloadFile(BuildContext context, String url, String id) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    
+    try {
+      // Check current permission status
+      var status = await Permission.manageExternalStorage.status;
+      
+      // If permission is denied, request it
+      if (status.isDenied) {
+        status = await Permission.manageExternalStorage.request();
+        
+        // If still denied after request
+        if (!status.isGranted) {
+          if (!mounted) return;
+          // Show message with option to open settings
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: const Text('Storage permission is required to download files. Please enable "Files and media" permission in Settings.'),
+              action: SnackBarAction(
+                label: 'Settings',
+                onPressed: () => openAppSettings(),
+              ),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+          return;
+        }
       }
 
-      // Define the file path
-      String savePath = '${downloadsDirectory.path}/$id.pdf';
+      if (!mounted) return;
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Preparing download...')),
+      );
+
+      // Get file path after permission is granted
+      final filePath = await _getFilePath(id);
+      if (filePath == null) {
+        if (!mounted) return;
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Could not access storage location')),
+        );
+        return;
+      }
 
       // Download the file
-      Dio dio = Dio();
-      await dio.download(url, savePath);
+      final dio = Dio();
+      await dio.download(url, filePath);
 
-      // Trigger a notification after successful download
-      await NotificationService.showNotification(
-        title: 'Download Complete',
-        body: 'The file has been successfully downloaded to $savePath.',
-      );
-
-      // Show a SnackBar after successful download
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Download successful!'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.fixed,
-        ),
-      );
-
-      print("File downloaded to $savePath");
+      // Open the file
+      final file = File(filePath);
+      if (await file.exists()) {
+        await OpenFile.open(filePath);
+      } else {
+        if (mounted) {
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(content: Text('Download failed: File not found')),
+          );
+        }
+      }
     } catch (e) {
-      print("Error downloading file: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to download the file.')),
-      );
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(content: Text('Error downloading file: $e')),
+        );
+      }
     }
   }
-
-  Future<String?> _getFilePath(String id) async {
-    var dir = await getExternalStorageDirectory();
-    return '${dir!.path}/$id.pdf';
-  }
-
-//________________________________________________________________x
 
   List<Receipt> _getLatestReceipts(List<Receipt> receipts) {
     // Sort receipts by created_at date in descending order
@@ -654,7 +710,7 @@ class _LastTenReceiptsWidgetState extends State<LastTenReceiptsWidget> {
                             margin: const EdgeInsets.only(right: 4),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: _getStatusColor(receipt.receiptStatus!),
+                              color: _getStatusColor(receipt.status!),
                             ),
                           ),
                           Text(
@@ -846,6 +902,13 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
   late List<Receipt> _filteredReceipts;
   DateTime? _startDate;
   DateTime? _endDate;
+  late BuildContext _scaffoldContext;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scaffoldContext = context;
+  }
 
   @override
   void initState() {
@@ -881,8 +944,6 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
                   style: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              // Text('Status: $status', style: const TextStyle(fontSize: 14)),
-              // const SizedBox(height: 8),
               Text('Id: $id', style: const TextStyle(fontSize: 14)),
               const SizedBox(height: 16),
 
@@ -890,7 +951,7 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
               SizedBox(
                 height: 300,
                 child: SfPdfViewer.network(
-                  'https://eofficess.com/api/user-receipt-pdf/$id', // Dynamic URL
+                  'https://eofficess.com/api/user-receipt-pdf/$id',
                 ),
               ),
 
@@ -899,41 +960,36 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   ElevatedButton(
-                    style:
-                        ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                     onPressed: () async {
-                      // Request permission to write to storage
-                      var status = await Permission.storage.request();
-                      if (status.isGranted) {
-                        final downloadUrl =
-                            'https://eofficess.com/api/user-receipt-pdf/$id';
-                        await downloadFile(context, downloadUrl, id);
-                      } else {
-                        // Handle permission denied
-                        print("Permission Denied");
-                      }
+                      Navigator.pop(context); // Close the dialog first
+                      final downloadUrl = 'https://eofficess.com/api/user-receipt-pdf/$id';
+                      await downloadFile(downloadUrl, id);
                     },
                     child: const Text('Download',
                         style: TextStyle(color: Colors.white)),
                   ),
+                  const SizedBox(height: 8),
                   ElevatedButton(
-                    style:
-                        ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
                     onPressed: () async {
-                      final filePath = await _getFilePath(id);
-                      if (filePath != null) {
-                        File file = File(filePath);
+                      final downloadUrl = 'https://eofficess.com/api/user-receipt-pdf/$id';
+                      final tempDir = await getTemporaryDirectory();
+                      final tempPath = '${tempDir.path}/Receipt_$id.pdf';
+                      
+                      // Download to temp directory first
+                      try {
+                        await Dio().download(downloadUrl, tempPath);
+                        final file = File(tempPath);
                         if (await file.exists()) {
                           final xFile = XFile(file.path);
                           await Share.shareXFiles([xFile],
-                              text: 'Check out this PDF: $name');
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text(
-                                    'File not found. Please download it first.')),
-                          );
+                              text: 'Receipt: $name');
                         }
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed to share: ${e.toString()}')),
+                        );
                       }
                     },
                     child: const Text('Share',
@@ -945,9 +1001,7 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+              onPressed: () => Navigator.of(context).pop(),
               child: const Text("Close", style: TextStyle(color: Colors.black)),
             ),
           ],
@@ -956,50 +1010,95 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
     );
   }
 
-  Future<void> downloadFile(BuildContext context, String url, String id) async {
+  Future<void> downloadFile(String url, String id) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    
     try {
-      // Define the path to the Downloads directory
-      final downloadsDirectory = Directory('/storage/emulated/0/Download');
-
-      // Ensure the directory exists
-      if (!downloadsDirectory.existsSync()) {
-        downloadsDirectory.createSync(recursive: true);
+      // Check current permission status
+      var status = await Permission.manageExternalStorage.status;
+      
+      // If permission is denied, request it
+      if (status.isDenied) {
+        status = await Permission.manageExternalStorage.request();
+        
+        // If still denied after request
+        if (!status.isGranted) {
+          if (!mounted) return;
+          // Show message with option to open settings
+          scaffoldMessenger.showSnackBar(
+            SnackBar(
+              content: const Text('Storage permission is required to download files. Please enable "Files and media" permission in Settings.'),
+              action: SnackBarAction(
+                label: 'Settings',
+                onPressed: () => openAppSettings(),
+              ),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+          return;
+        }
       }
 
-      // Define the file path
-      String savePath = '${downloadsDirectory.path}/$id.pdf';
+      if (!mounted) return;
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(content: Text('Preparing download...')),
+      );
+
+      // Get file path after permission is granted
+      final filePath = await _getFilePath(id);
+      if (filePath == null) {
+        if (!mounted) return;
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Could not access storage location')),
+        );
+        return;
+      }
 
       // Download the file
-      Dio dio = Dio();
-      await dio.download(url, savePath);
+      final dio = Dio();
+      await dio.download(url, filePath);
 
-      // Trigger a notification after successful download
-      await NotificationService.showNotification(
-        title: 'Download Complete',
-        body: 'The file has been successfully downloaded to $savePath.',
-      );
-
-      // Show a SnackBar after successful download
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Download successful!'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.fixed,
-        ),
-      );
-
-      print("File downloaded to $savePath");
+      // Open the file
+      final file = File(filePath);
+      if (await file.exists()) {
+        await OpenFile.open(filePath);
+      } else {
+        if (mounted) {
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(content: Text('Download failed: File not found')),
+          );
+        }
+      }
     } catch (e) {
-      print("Error downloading file: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to download the file.')),
-      );
+      if (mounted) {
+        scaffoldMessenger.showSnackBar(
+          SnackBar(content: Text('Error downloading file: $e')),
+        );
+      }
     }
   }
 
   Future<String?> _getFilePath(String id) async {
-    var dir = await getExternalStorageDirectory();
-    return '${dir!.path}/$id.pdf';
+    // Request storage permission first
+    var status = await Permission.manageExternalStorage.status;
+    if (!status.isGranted) {
+      status = await Permission.manageExternalStorage.request();
+      if (!status.isGranted) {
+        return null;
+      }
+    }
+    
+    // Get the downloads directory path
+    final dir = await getExternalStorageDirectory();
+    if (dir == null) return null;
+    
+    // Create the directory if it doesn't exist
+    final downloadsDir = Directory('${dir.path}/Downloads');
+    if (!await downloadsDir.exists()) {
+      await downloadsDir.create(recursive: true);
+    }
+    
+    return '${downloadsDir.path}/Receipt_$id.pdf';
   }
 
 //________________________________________________________________x
@@ -1120,7 +1219,7 @@ class _AllReceiptsWidgetState extends State<AllReceiptsWidget> {
                             margin: const EdgeInsets.only(right: 4),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: _getStatusColor(receipt.receiptStatus!),
+                              color: _getStatusColor(receipt.status!),
                             ),
                           ),
                           Text(

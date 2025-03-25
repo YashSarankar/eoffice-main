@@ -534,6 +534,7 @@ class ApiService {
         throw Exception('User is not logged in');
       }
 
+      print('Token: $token');
       final response = await http.post(
         Uri.parse(url),
         headers: {

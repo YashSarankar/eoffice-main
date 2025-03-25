@@ -57,8 +57,8 @@ class ReceiptDetailScreen extends StatelessWidget {
                   children: [
                     _buildTableCell(receipt.id.toString()),
                     _buildTableCell(receipt.receiptNo.toString()),
-                    _buildTableCell(receipt.letterNo),
-                    _buildTableCell(receipt.dateOfGenerated),
+                    _buildTableCell(receipt.letterNo ?? '_'),
+                    _buildTableCell(receipt.dateOfGenerated ?? '_'),
                   ],
                 );
               }).toList(),

@@ -158,8 +158,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
   Future<void> _uploadFiles() async {
     if (!_hasValidDocument()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Please complete all documents before submitting')),
+        const SnackBar(content: Text('Please complete all documents before submitting')),
       );
       return;
     }
@@ -170,20 +169,22 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
 
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getString('id');
+    final token = await getAuthToken(); // Get the auth token
 
-    if (userId == null) {
+    if (userId == null || token == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User ID not found')),
+        const SnackBar(content: Text('User ID or authentication token not found')),
       );
       setState(() {
-        _isLoading = false; // Hide loading indicator
+        _isLoading = false;
       });
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => UserAppLoginScreen()));
       return;
     }
 
-    final uri = Uri.parse('https://eofficess.com/api/add-user-document');
-
     var dio = Dio();
+    // Add authorization header
+    dio.options.headers['Authorization'] = 'Bearer $token';
 
     print("DOCUMETNS: $_documents");
     List<String> names = [];
@@ -247,111 +248,6 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
         _isLoading = false;
       });
     }
-
-    // try {
-    //   var request = http.MultipartRequest('POST', uri);
-    //     request.fields['user_id'] = userId;
-    //
-    //
-    //   print("DOCUMENTS: $_documents");
-    //
-    //
-    //   // Loop through the documents to add them to the request
-    //   for (var i = 0; i < _documents.length; i++) {
-    //     var document = _documents[i];
-    //     if (document['file'] != null) {
-    //       String filePath = document['file']!.path;
-    //
-    //       var multipartFile = await http.MultipartFile.fromPath(
-    //         'document-upload[]',
-    //         filePath,
-    //       );
-    //
-    //       // Add the multipart file
-    //       request.files.add(multipartFile);
-    //       request.fields['document-name[]'] = document['type'] ?? 'Untitled';
-    //
-    //     }
-    //     else {
-    //       ScaffoldMessenger.of(context).showSnackBar(
-    //         SnackBar(
-    //             content: Text(
-    //                 'No file selected for document type ${document['type']}')),
-    //       );
-    //
-    //
-    //       setState(() {
-    //         _isLoading = false; // Hide loading indicator
-    //       });
-    //
-    //       return;
-    //
-    //     }
-    //   }
-    //
-    //   final response = await request.send();
-    //   final responseBody = await response.stream.bytesToString();
-    //   final jsonResponse = jsonDecode(responseBody);
-    //
-    //   if (response.statusCode == 200 || response.statusCode == 201) {
-    //     if (jsonResponse['error'] == false) {
-    //       setState(() {
-    //
-    //         final savedDocuments =
-    //             jsonResponse['data']['saved_documents'] as List;
-    //
-    //
-    //
-    //         for (var i = 0; i < savedDocuments.length; i++) {
-    //
-    //           final savedDocument = savedDocuments[i];
-    //           final localDocument = _documents[i];
-    //
-    //
-    //           savedDocument['doc_name'] = localDocument['type'] ?? 'Untitled';
-    //
-    //           savedDocument['document'] =
-    //               localDocument['file']?.path.split('/').last ?? 'Unknown';
-    //         }
-    //
-    //
-    //         ScaffoldMessenger.of(context).showSnackBar(
-    //           SnackBar(content: Text('Documents submitted successfully')),
-    //         );
-    //
-    //
-    //         _documents.clear();
-    //         _documents.add({
-    //           'type': '',
-    //           'file': null,
-    //           'name': ''
-    //         }); // Reinitialize with one document entry
-    //       });
-    //     }
-    //     else {
-    //       ScaffoldMessenger.of(context).showSnackBar(
-    //         SnackBar(
-    //             content:
-    //                 Text(jsonResponse['message'] ?? 'Failed to upload files')),
-    //       );
-    //     }
-    //   }
-    //   else {
-    //     print('Failed to upload files: $responseBody');
-    //     ScaffoldMessenger.of(context).showSnackBar(
-    //       SnackBar(content: Text('Failed to upload files')),
-    //     );
-    //   }
-    // } catch (e) {
-    //   print('Exception: $e');
-    //   ScaffoldMessenger.of(context).showSnackBar(
-    //     SnackBar(content: Text('An error occurred during file upload')),
-    //   );
-    // } finally {
-    //   setState(() {
-    //     _isLoading = false; // Hide loading indicator
-    //   });
-    // }
   }
 
   Future<void> _downloadFile(String? documentName, String? docName) async {
@@ -504,6 +400,7 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
+        elevation: 0, // Remove shadow
         titleSpacing: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, size: 24, color: Colors.white),
@@ -514,21 +411,65 @@ class _DocumentUploadScreenState extends State<DocumentUploadScreen>
             );
           },
         ),
-        title: const Text('Document Upload',
-            style: TextStyle(fontSize: 20, color: Colors.white)),
+        title: const Text(
+          'Document Upload',
+          style: TextStyle(
+            fontSize: 20,
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         backgroundColor: const Color(0xFF4769B2),
-        bottom: TabBar(
-          physics: const NeverScrollableScrollPhysics(),
-          unselectedLabelColor: Colors.white,
-          labelColor: Colors.white,
-          indicatorColor: Colors.white,
-          indicatorPadding:
-              const EdgeInsets.symmetric(horizontal: 0, vertical: 5),
-          controller: _tabController,
-          tabs: [
-            const Tab(text: 'Upload Document'),
-            const Tab(text: 'View Document'),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(60),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFF4769B2),
+              border: Border(
+                bottom: BorderSide(color: Colors.white10, width: 1),
+              ),
+            ),
+            child: TabBar(
+              physics: const NeverScrollableScrollPhysics(),
+              unselectedLabelColor: Colors.white60,
+              labelColor: Colors.white,
+              indicatorColor: Colors.white,
+              indicatorWeight: 3,
+              indicatorSize: TabBarIndicatorSize.tab,
+              labelStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w400,
+              ),
+              controller: _tabController,
+              tabs: [
+                Tab(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.upload_file, size: 20),
+                      SizedBox(width: 8),
+                      Text('Upload'),
+                    ],
+                  ),
+                ),
+                Tab(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.folder_open, size: 20),
+                      SizedBox(width: 8),
+                      Text('View'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
       body: Column(

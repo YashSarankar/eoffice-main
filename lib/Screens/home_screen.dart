@@ -1043,7 +1043,7 @@ class _Widget3State extends State<Widget3> {
                         GestureDetector(
                           onTap: () {
                             _navigateToDetailScreen(
-                                'Approved', _receiptData!.approvedReceipts);
+                                'Approved', _receiptData!.approvedReceipts ?? []);
                           },
                           child: Card(
                             color: Colors.green[50],
@@ -1076,7 +1076,7 @@ class _Widget3State extends State<Widget3> {
                         GestureDetector(
                           onTap: () {
                             _navigateToDetailScreen(
-                                'Pending', _receiptData!.pendingReceipts);
+                                'Pending', _receiptData!.pendingReceipts ?? []);
                           },
                           child: Card(
                             color: Colors.yellow[50],
@@ -1110,7 +1110,7 @@ class _Widget3State extends State<Widget3> {
                         GestureDetector(
                             onTap: () {
                               _navigateToDetailScreen(
-                                  'Rejected', _receiptData!.rejectedReceipts);
+                                  'Rejected', _receiptData!.rejectedReceipts ?? []);
                             },
                             child: Card(
                               color: Colors.red[50],

@@ -48,6 +48,27 @@ class Receipt {
   String? receiptPdf;
   String? createdAt;
   String? updatedAt;
+  String? letterContent;
+  String? letterNo;
+  String? dateOfGenerated;
+  String? clerkSignature;
+  String? hodSignature;
+  String? ownerId;
+  String? clerkOtp;
+  String? hodOtp;
+  String? hodOtpStatus;
+  String? clerkOtpStatus;
+  String? dateOfGeneratedClerk;
+  String? frwdStaffId;
+  String? frwdHodId;
+  String? status;
+  String? clerkVerifyStaff;
+  String? hodVerifyStaff;
+  String? rejectedBy;
+  String? rejectDescription;
+  String? clerkCreate;
+  
+  
   int? userId;
 
   Receipt({
@@ -58,6 +79,20 @@ class Receipt {
     this.description,
     this.receiptStatus,
     this.receiptPdf,
+    this.letterContent,
+    this.letterNo,
+    this.dateOfGenerated,
+    this.clerkSignature,
+    this.hodSignature,
+    this.ownerId,
+    this.clerkOtp,
+    this.hodOtp,
+    this.hodOtpStatus,
+    this.clerkOtpStatus,
+    this.dateOfGeneratedClerk,
+    this.frwdStaffId,
+    this.frwdHodId,
+    this.status,
     this.createdAt,
     this.updatedAt,
     this.userId,
@@ -74,6 +109,20 @@ class Receipt {
       receiptPdf: json['receipt_pdf'],
       createdAt: json['created_at'],
       updatedAt: json['updated_at'],
+      letterContent: json['letter_content'],
+      letterNo: json['letter_no'],
+      dateOfGenerated: json['date_of_generated'],
+      clerkSignature: json['clerk_signature'],
+      hodSignature: json['hod_signature'],
+      ownerId: json['owner_id'],
+      clerkOtp: json['clerk_otp'],
+      hodOtp: json['hod_otp'],
+      hodOtpStatus: json['hod_otp_status'],
+      clerkOtpStatus: json['clerk_otp_status'],
+      dateOfGeneratedClerk: json['date_of_generated_clerk'],
+      frwdStaffId: json['frwd_staff_id'],
+      frwdHodId: json['frwd_hod_id'],
+      status: json['status'],
       userId: json['user_id'],
     );
   }
@@ -90,6 +139,21 @@ class Receipt {
     data['created_at'] = this.createdAt;
     data['updated_at'] = this.updatedAt;
     data['user_id'] = this.userId;
+    data['letter_content'] = this.letterContent;
+    data['letter_no'] = this.letterNo;
+    data['date_of_generated'] = this.dateOfGenerated;
+    data['clerk_signature'] = this.clerkSignature;
+    data['hod_signature'] = this.hodSignature;
+    data['owner_id'] = this.ownerId;
+    data['clerk_otp'] = this.clerkOtp;
+    data['hod_otp'] = this.hodOtp;
+    data['hod_otp_status'] = this.hodOtpStatus;
+    data['clerk_otp_status'] = this.clerkOtpStatus;
+    data['date_of_generated_clerk'] = this.dateOfGeneratedClerk;
+    data['frwd_staff_id'] = this.frwdStaffId;
+    data['frwd_hod_id'] = this.frwdHodId;
+    data['status'] = this.status;
+    
     return data;
   }
 }
